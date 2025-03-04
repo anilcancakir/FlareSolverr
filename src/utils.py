@@ -202,8 +202,9 @@ async def get_webdriver_nd(proxy: dict = None) -> nd.Browser:
     # attempt to fix Docker ARM32 build
     # options.add_argument('--disable-gpu-sandbox')
     options.add_argument('--disable-software-rasterizer')
-    # options.add_argument('--ignore-certificate-errors')
-    # options.add_argument('--ignore-ssl-errors')
+    options.add_argument('--disable-gpu')
+    options.add_argument('--ignore-certificate-errors')
+    options.add_argument('--ignore-ssl-errors')
     # fix GL errors in ASUSTOR NAS
     # https://github.com/FlareSolverr/FlareSolverr/issues/782
     # https://github.com/microsoft/vscode/issues/127800#issuecomment-873342069

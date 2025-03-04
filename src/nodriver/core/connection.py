@@ -25,7 +25,7 @@ PING_TIMEOUT: int = 900  # 15 minutes
 
 TargetType = Union[cdp.target.TargetInfo, cdp.target.TargetID]
 
-logger = logging.getLogger("uc.connection")
+logger = logging.getLogger(__name__)
 
 
 class ProtocolException(Exception):
@@ -88,6 +88,7 @@ class Transaction(asyncio.Future):
 
     @property
     def message(self):
+
         return json.dumps({"method": self.method, "params": self.params, "id": self.id})
 
     @property
@@ -416,8 +417,11 @@ class Connection(metaclass=CantTouchThis):
         try:
             tx = Transaction(cdp_obj)
             tx.connection = self
-            if not self.mapper:
+            # if not self.mapper:
+            if not _is_update:
+                self.mapper.clear()
                 self.__count__ = itertools.count(0)
+
             tx.id = next(self.__count__)
             self.mapper.update({tx.id: tx})
             if not _is_update:
@@ -626,7 +630,7 @@ class Listener:
 
                     # thanks to zxsleebu for discovering the memory leak
                     # pop to prevent memory leaks
-                    tx = self.connection.mapper.pop(message["id"])
+                    tx = self.connection.mapper[message["id"]]
                     logger.debug("got answer for %s (message_id:%d)", tx, message["id"])
 
                     # complete the transaction, which is a Future object

@@ -113,6 +113,7 @@ if __name__ == "__main__":
     logging.getLogger("nd.core.element").disabled = True
     logging.getLogger("nodriver.core.browser").disabled = True
     logging.getLogger("nodriver.core.tab").disabled = True
+    logging.getLogger("nodriver.core.connection").disabled = True
     logging.getLogger("websockets.client").disabled = True
 
     logging.info(f"FlareSolverr {utils.get_flaresolverr_version()}")

@@ -9,7 +9,7 @@ from nodriver.core.element import Element
 from nodriver.core.tab import Tab
 from nodriver.core.util import loop, start
 
-__version__ = "0.39"
+__version__ = "0.40"
 
 __all__ = [
     "loop",

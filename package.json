@@ -1,7 +1,15 @@
 {
   "name": "flaresolverr",
-  "version": "0.0.7",
+  "version": "3.5.0",
   "description": "Proxy server to bypass Cloudflare protection",
-  "author": "Diego Heras (ngosang / ngosang@hotmail.es)",
-  "license": "MIT"
+  "author": "Anilcan Cakir <anilcan.cakir@gmail.com>",
+  "license": "MIT",
+  "contributors": [
+    "Diego Heras (ngosang / ngosang@hotmail.es)",
+    "21hsmw (https://github.com/21hsmw)"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/anilcancakir/FlareSolverr"
+  }
 }

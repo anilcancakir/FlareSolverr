@@ -1,14 +1,23 @@
 # FlareSolverr
 
-[![Latest release](https://img.shields.io/github/v/release/FlareSolverr/FlareSolverr)](https://github.com/FlareSolverr/FlareSolverr/releases)
-[![Docker Pulls](https://img.shields.io/docker/pulls/flaresolverr/flaresolverr)](https://hub.docker.com/r/flaresolverr/flaresolverr/)
-[![GitHub issues](https://img.shields.io/github/issues/FlareSolverr/FlareSolverr)](https://github.com/FlareSolverr/FlareSolverr/issues)
-[![GitHub pull requests](https://img.shields.io/github/issues-pr/FlareSolverr/FlareSolverr)](https://github.com/FlareSolverr/FlareSolverr/pulls)
-[![Donate PayPal](https://img.shields.io/badge/Donate-PayPal-yellow.svg)](https://www.paypal.com/paypalme/diegoheras0xff)
-[![Donate Bitcoin](https://img.shields.io/badge/Donate-Bitcoin-f7931a.svg)](https://www.blockchain.com/btc/address/13Hcv77AdnFWEUZ9qUpoPBttQsUT7q9TTh)
-[![Donate Ethereum](https://img.shields.io/badge/Donate-Ethereum-8c8c8c.svg)](https://www.blockchain.com/eth/address/0x0D1549BbB00926BF3D92c1A8A58695e982f1BE2E)
+[![GitHub release](https://img.shields.io/github/v/release/anilcancakir/FlareSolverr)](https://github.com/anilcancakir/FlareSolverr/releases)
+[![GitHub issues](https://img.shields.io/github/issues/anilcancakir/FlareSolverr)](https://github.com/anilcancakir/FlareSolverr/issues)
+[![License](https://img.shields.io/github/license/anilcancakir/FlareSolverr)](https://github.com/anilcancakir/FlareSolverr/blob/main/LICENSE)
 
 FlareSolverr is a proxy server to bypass Cloudflare and DDoS-GUARD protection.
+
+> **This is a fork** maintained by [Anilcan Cakir](mailto:anilcan.cakir@gmail.com) with enhanced nodriver support and additional features.
+
+## Credits & References
+
+This project is built upon the excellent work of:
+
+| Project | Author | Description |
+|---------|--------|-------------|
+| [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) | Diego Heras (ngosang) | Original FlareSolverr project |
+| [FlareSolverr nodriver fork](https://github.com/21hsmw/FlareSolverr) | 21hsmw | nodriver implementation and various improvements |
+| [nodriver](https://github.com/ultrafunkamsterdam/nodriver) | ultrafunkamsterdam | Modern async CDP-based browser automation |
+| [undetected-chromedriver](https://github.com/ultrafunkamsterdam/undetected-chromedriver) | ultrafunkamsterdam | Selenium-based undetected Chrome driver |
 
 ## How it works
 
@@ -360,22 +369,43 @@ to the file name of one of the adapters inside the [/captcha](src/captcha) direc
 
 ## Changelog
 
-### v0.0.7
-- Added log truncation for long HTML content in debug output (truncates to 100 chars with original length info)
-- Improved logging readability for debugging
+### v3.5.0
+This release is based on [upstream v3.4.x](https://github.com/FlareSolverr/FlareSolverr) with [21hsmw's nodriver implementation](https://github.com/21hsmw/FlareSolverr) and additional enhancements.
 
-### v0.0.6
-- Added custom HTTP headers support via `headers` parameter
-- Response now includes captured HTTP headers from the server
-- Fixed "Event loop is closed" error on browser cleanup
+**New Features:**
+- Custom HTTP headers support via `headers` parameter
+- Response headers capture from server responses
+- Log truncation for long HTML content in debug output (100 chars with original length info)
+- Redirect URL tracking in debug logs
+
+**Improvements:**
+- nodriver as default solving method (async CDP-based)
+- Better browser process cleanup
 - Reduced browser path scanning log noise
-- Added network handler cleanup to prevent memory leaks
-- Added redirect URL tracking in debug logs
+- Network handler cleanup to prevent memory leaks
 
-### v0.0.5
-- Initial nodriver support release
-- Async CDP-based browser automation
+**Bug Fixes:**
+- Fixed "Event loop is closed" error on browser cleanup
+- Fixed captcha looping issue
+- Fixed cookies not being appended in browser
 
-## Related projects
+**Based on 21hsmw's work:**
+- Full nodriver support with async CDP
+- Session management for nodriver
+- Windows headless support
+- Cloudflare Turnstile patcher extension
+- Cookie importation support
 
-* C# implementation => https://github.com/FlareSolverr/FlareSolverrSharp
+## Related Projects
+
+* [FlareSolverr (upstream)](https://github.com/FlareSolverr/FlareSolverr) - Original project by Diego Heras
+* [FlareSolverr nodriver](https://github.com/21hsmw/FlareSolverr) - nodriver implementation by 21hsmw
+* [FlareSolverrSharp](https://github.com/FlareSolverr/FlareSolverrSharp) - C# implementation
+
+## Author
+
+**Anilcan Cakir** - [anilcan.cakir@gmail.com](mailto:anilcan.cakir@gmail.com)
+
+## License
+
+MIT License - see [LICENSE](LICENSE) file for details.

@@ -33,7 +33,7 @@ class V1RequestBase(object):
     proxy: dict = None
     session: str = None
     session_ttl_minutes: int = None
-    headers: list = None  # deprecated v2.0.0, not used
+    headers: dict = None  # custom HTTP headers to send with request
     userAgent: str = None  # deprecated v2.0.0, not used
 
     # V1Request

@@ -150,6 +150,22 @@ $body = @{
 irm -UseBasicParsing 'http://localhost:8191/v1' -Headers @{"Content-Type"="application/json"} -Method Post -Body $body
 ```
 
+Example request with custom headers:
+
+```bash
+curl -L -X POST 'http://localhost:8191/v1' \
+-H 'Content-Type: application/json' \
+--data-raw '{
+  "cmd": "request.get",
+  "url": "https://httpbin.org/headers",
+  "maxTimeout": 60000,
+  "headers": {
+    "X-Custom-Header": "my-value",
+    "Accept-Language": "tr-TR"
+  }
+}'
+```
+
 ### Commands
 
 #### + `sessions.create`
@@ -204,6 +220,7 @@ session. When you no longer need to use a session you should make sure to close 
 | session_ttl_minutes | Optional. FlareSolverr will automatically rotate expired sessions based on the TTL provided in minutes.                                                                                                                                                                                                                                     |
 | maxTimeout          | Optional, default value 60000. Max timeout to solve the challenge in milliseconds.                                                                                                                                                                                                                                                          |
 | cookies             | Optional. Will be used by the headless browser. Eg:`"cookies": [{"name": "cookie1", "value": "value1"}, {"name": "cookie2", "value": "value2"}]`.                                                                                                                                                                                           |
+| headers             | Optional. Custom HTTP headers to send with the request. Eg: `"headers": {"X-Custom-Header": "value", "Accept-Language": "en-US"}`. These headers will be included in every request made by the browser.                                                                                                                                     |
 | returnOnlyCookies   | Optional, default false. Only returns the cookies. Response data, headers and other parts of the response are removed.                                                                                                                                                                                                                      |
 | proxy               | Optional, default disabled. Eg:`"proxy": {"url": "http://127.0.0.1:8888"}`. You must include the proxy schema in the URL: `http://`, `socks4://` or `socks5://`. Authorization (username/password) is not supported. (When the `session` parameter is set, the proxy is ignored; a session specific proxy can be set in `sessions.create`.) |
 
@@ -340,6 +357,24 @@ If this is the case, FlareSolverr will return the error `Captcha detected but no
 
 FlareSolverr can be customized to solve the CAPTCHA automatically by setting the environment variable `CAPTCHA_SOLVER`
 to the file name of one of the adapters inside the [/captcha](src/captcha) directory.
+
+## Changelog
+
+### v0.0.7
+- Added log truncation for long HTML content in debug output (truncates to 100 chars with original length info)
+- Improved logging readability for debugging
+
+### v0.0.6
+- Added custom HTTP headers support via `headers` parameter
+- Response now includes captured HTTP headers from the server
+- Fixed "Event loop is closed" error on browser cleanup
+- Reduced browser path scanning log noise
+- Added network handler cleanup to prevent memory leaks
+- Added redirect URL tracking in debug logs
+
+### v0.0.5
+- Initial nodriver support release
+- Async CDP-based browser automation
 
 ## Related projects
 

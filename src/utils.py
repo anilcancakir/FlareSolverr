@@ -245,8 +245,8 @@ async def get_webdriver_nd(proxy: dict = None) -> nd.Browser:
     # For normal headless mode:
     # options.headless = True or False
 
-    # Add browser binary path for Windows
-    if PLATFORM_VERSION == "nt":
+    # Set browser binary path to avoid re-scanning on every request
+    if CHROME_EXE_PATH is not None:
         options.browser_executable_path = CHROME_EXE_PATH
 
     try:
@@ -522,7 +522,10 @@ async def after_run_cleanup(driver: nd.Browser):
         return
 
     # Get the list of child processes before closing the Browser instance
-    child_processes = psutil.Process(process.pid).children(recursive=True)
+    try:
+        child_processes = psutil.Process(process.pid).children(recursive=True)
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        child_processes = []
 
     # Stop Browser instance
     driver.stop()
@@ -534,6 +537,21 @@ async def after_run_cleanup(driver: nd.Browser):
         if websocket_status:
             break
         await asyncio.sleep(0.1)
+
+    # Explicitly wait for main process to terminate to avoid event loop closed errors
+    try:
+        # Give the process a moment to terminate gracefully
+        await asyncio.sleep(0.1)
+        if process.returncode is None:
+            process.terminate()
+            # Wait with timeout for the process to actually terminate
+            try:
+                await asyncio.wait_for(process.wait(), timeout=5.0)
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+    except Exception as e:
+        logging.debug(f"Process cleanup note: {e}")
 
     # Find all chromium processes and terminate them if any
     for proc in child_processes:
@@ -595,3 +613,28 @@ def object_to_dict(_object):
     json_dict = json.loads(json.dumps(_object, default=lambda o: o.__dict__))
     # remove hidden fields
     return {k: v for k, v in json_dict.items() if not k.startswith("__")}
+
+
+def truncate_string(value: str, max_length: int = 100) -> str:
+    """Truncate a string to max_length chars with (TRUNCATED xxx) suffix."""
+    if value is None or len(value) <= max_length:
+        return value
+    original_length = len(value)
+    return f"{value[:max_length]}... (TRUNCATED {original_length})"
+
+
+def truncate_dict_values(data, max_length: int = 100):
+    """Recursively truncate long string values in a dictionary."""
+    if isinstance(data, dict):
+        return {k: truncate_dict_values(v, max_length) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [truncate_dict_values(item, max_length) for item in data]
+    elif isinstance(data, str):
+        return truncate_string(data, max_length)
+    return data
+
+
+def object_to_dict_truncated(_object, max_length: int = 100):
+    """Convert object to dict with truncated long string values for logging."""
+    json_dict = object_to_dict(_object)
+    return truncate_dict_values(json_dict, max_length)

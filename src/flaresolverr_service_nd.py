@@ -56,7 +56,6 @@ CHALLENGE_SELECTORS = [
     # Fairlane / pararius.com
     "div.vc div.text-box h2",
 ]
-STATUS_CODE = 200  # Always return 200 until I can catch the proper return code
 SHORT_TIMEOUT = 2
 SESSIONS_STORAGE = SessionsStorage()
 
@@ -104,7 +103,7 @@ async def controller_v1_endpoint_nd(req: V1RequestBase) -> V1ResponseBase:
     res.endTimestamp = int(time.time() * 1000)
     res.version = utils.get_flaresolverr_version()
 
-    logging.debug(f"Response => POST /v1 body: {utils.object_to_dict(res)}")
+    logging.debug(f"Response => POST /v1 body: {utils.object_to_dict_truncated(res)}")
     logging.info(f"Response in {(res.endTimestamp - res.startTimestamp) / 1000} s")
     return res
 
@@ -113,8 +112,6 @@ async def _controller_v1_handler_nd(req: V1RequestBase) -> V1ResponseBase:
     # do some validations
     if req.cmd is None:
         raise Exception("Request parameter 'cmd' is mandatory.")
-    if req.headers is not None:
-        logging.warning("Request parameter 'headers' was removed in FlareSolverr v2.")
     if req.userAgent is not None:
         logging.warning("Request parameter 'userAgent' was removed in FlareSolverr v2.")
 
@@ -274,13 +271,6 @@ async def _resolve_challenge_nd(
             logging.debug("A used instance of chromium has been destroyed")
 
 
-def get_status_code(event):
-    # TO-DO: Need to limit events to the currently used url
-    global STATUS_CODE
-    STATUS_CODE = event
-    # logging.debug("Current network request status code: %s" % STATUS_CODE)
-
-
 async def _evil_logic_nd(
     req: V1RequestBase, driver: Browser, method: str
 ) -> ChallengeResolutionT:
@@ -288,39 +278,90 @@ async def _evil_logic_nd(
     res.status = STATUS_OK
     res.message = ""
 
+    # Storage for captured response data
+    captured_response_headers = {}
+    captured_status_code = 200
+    captured_response_url = None
+    network_enabled = False
+
+    def on_response_received(event: utils.nd.cdp.network.ResponseReceived):
+        nonlocal captured_response_headers, captured_status_code, captured_response_url
+        # Only capture for document type (main page request)
+        if event.type_ == utils.nd.cdp.network.ResourceType.DOCUMENT:
+            # Track redirects - log if URL changed
+            if captured_response_url is not None and captured_response_url != event.response.url:
+                logging.debug(f"[REDIRECT] {captured_response_url} -> {event.response.url}")
+            captured_response_url = event.response.url
+            captured_response_headers = dict(event.response.headers)
+            captured_status_code = event.response.status
+            logging.debug(f"[RESPONSE-HEADERS] Captured {len(captured_response_headers)} headers, status: {captured_status_code}")
+
     # navigate to the page
-    logging.debug(f"Navigating to... {req.url}")
+    logging.debug(f"[NAVIGATION] Starting navigation to: {req.url}")
+    logging.debug(f"[NAVIGATION] Method: {method}")
+
+    # Always open blank page first to enable network monitoring
+    tab = await driver.get("about:blank")
+
+    # Enable network monitoring with error handling
+    try:
+        await tab.send(utils.nd.cdp.network.enable())
+        network_enabled = True
+        logging.debug("[NETWORK] Network monitoring enabled")
+
+        # Add handler to capture response headers
+        tab.add_handler(utils.nd.cdp.network.ResponseReceived, on_response_received)
+        logging.debug("[NETWORK] Response handler added")
+    except Exception as e:
+        logging.warning(f"[NETWORK] Failed to enable network monitoring: {e}")
+        logging.warning("[NETWORK] Response headers will not be captured for this request")
+
+    # Set custom headers if provided
+    if req.headers is not None and len(req.headers) > 0:
+        try:
+            logging.debug(f"[HEADERS] Setting custom headers: {req.headers}")
+            await tab.send(utils.nd.cdp.network.set_extra_http_headers(
+                utils.nd.cdp.network.Headers(req.headers)
+            ))
+            logging.debug("[HEADERS] Custom headers set successfully")
+        except Exception as e:
+            logging.warning(f"[HEADERS] Failed to set custom headers: {e}")
+
+    # Navigate to actual URL
     if method == "POST":
         post_content = await _post_request_nd(req)
-        tab = await driver.get("data:text/html;charset=utf-8," + post_content)
+        logging.debug(f"[NAVIGATION] POST content generated, length: {len(post_content)} chars")
+        await tab.get("data:text/html;charset=utf-8," + post_content)
     else:
-        tab = await driver.get(req.url)
+        await tab.get(req.url)
 
-    # Add handler to watch the status code
-    # tab.add_handler(utils.nd.cdp.network.ResponseReceivedExtraInfo,
-    #                 lambda event: get_status_code(event.status_code))
+    logging.debug(f"[NAVIGATION] Navigation completed, tab target: {tab.target.target_id if tab.target else 'None'}")
+    logging.debug(f"[NAVIGATION] Tab URL: {tab.target.url if tab.target else 'None'}")
+    logging.debug(f"[NAVIGATION] Tab title: {tab.target.title if tab.target else 'None'}")
 
     # Insert cookies in Browser if set
     if req.cookies is not None and len(req.cookies) > 0:
+        logging.debug(f"[COOKIES] Processing {len(req.cookies)} cookies from request")
         await tab.wait(1)
         await tab
-        logging.debug(f"Setting cookies...")
+        logging.debug(f"[COOKIES] Setting cookies...")
 
         # Get cleaned domain
         domain = (urlparse(req.url).netloc).split(".")
         domain = ".".join(domain[-2:])
+        logging.debug(f"[COOKIES] Target domain: {domain}")
 
         # Delete all cookies
-        logging.debug("Removing all Browser cookies...")
+        logging.debug("[COOKIES] Removing all Browser cookies...")
         await driver.cookies.clear()
 
         cookies: List[utils.nd.cdp.network.CookieParam] = []
         for cookie in req.cookies:
             if domain not in cookie["domain"]:
-                logging.debug(f"Skipping cookie from domain {cookie['domain']}")
+                logging.debug(f"[COOKIES] Skipping cookie from domain {cookie['domain']}")
                 continue
             logging.debug(
-                f"Appending cookie '{cookie['name']}' for '{cookie['domain']}'..."
+                f"[COOKIES] Appending cookie '{cookie['name']}' for '{cookie['domain']}'..."
             )
             cookies.append(
                 utils.nd.cdp.network.CookieParam(
@@ -332,68 +373,87 @@ async def _evil_logic_nd(
             )
 
         await driver.cookies.set_all(cookies)
+        logging.debug(f"[COOKIES] Set {len(cookies)} cookies successfully")
 
         # reload the page
         if method == "POST":
             tab = await driver.get(post_content)
         else:
-            logging.debug("Reloading tab...")
+            logging.debug("[NAVIGATION] Reloading tab after cookie injection...")
             await tab.reload()
 
     # wait for the page and make sure it catches the load event
+    logging.debug("[PAGE] Waiting for page load event...")
     await tab.wait(1)
     await tab
+    logging.debug("[PAGE] Page load event received")
 
     # get current page nodes
+    logging.debug("[DOM] Requesting DOM document...")
     doc: utils.nd.cdp.dom.Node = await tab.send(utils.nd.cdp.dom.get_document(-1, True))
+    logging.debug(f"[DOM] Document received: {doc is not None}")
+    if doc:
+        logging.debug(f"[DOM] Document node_id: {doc.node_id}, node_name: {doc.node_name}")
 
     if utils.get_config_log_html():
         logging.debug(f"Response HTML:\n{await tab.get_content(_node=doc)}")
     page_title = tab.target.title
+    logging.debug(f"[PAGE] Page title: '{page_title}'")
 
     # find access denied titles
+    logging.debug(f"[DETECTION] Checking for access denied titles...")
     for title in ACCESS_DENIED_TITLES:
         if title == page_title:
+            logging.warning(f"[DETECTION] Access denied title matched: '{title}'")
             raise Exception(
                 "Cloudflare has blocked this request. "
                 "Probably your IP is banned for this site, check in your web browser."
             )
     # find access denied selectors
+    logging.debug(f"[DETECTION] Checking for access denied selectors...")
     for selector in ACCESS_DENIED_SELECTORS:
         found_elements = await tab.query_selector(selector=selector, _node=doc)
         if found_elements is not None:
+            logging.warning(f"[DETECTION] Access denied selector found: '{selector}'")
             raise Exception(
                 "Cloudflare has blocked this request. "
                 "Probably your IP is banned for this site, check in your web browser."
             )
 
     # find challenge by title
+    logging.debug(f"[DETECTION] Checking for challenge titles...")
     challenge_found = False
     for title in CHALLENGE_TITLES:
         if title.lower() == page_title.lower():
             challenge_found = True
-            logging.info("Challenge detected. Title found: " + page_title)
+            logging.info(f"[DETECTION] Challenge detected. Title found: '{page_title}'")
             break
     if not challenge_found:
         # find challenge by selectors
+        logging.debug(f"[DETECTION] Checking for challenge selectors...")
         for selector in CHALLENGE_SELECTORS:
             found_elements = await tab.query_selector(selector=selector, _node=doc)
             if found_elements is not None:
                 challenge_found = True
-                logging.info("Challenge detected. Selector found: " + selector)
+                logging.info(f"[DETECTION] Challenge detected. Selector found: '{selector}'")
                 break
+
+    if not challenge_found:
+        logging.debug("[DETECTION] No challenge detected")
 
     attempt = 0
     if challenge_found:
+        logging.debug("[CHALLENGE] Starting challenge resolution loop...")
         while True:
             try:
                 attempt = attempt + 1
+                logging.debug(f"[CHALLENGE] Attempt {attempt} - waiting for page...")
                 await tab.wait(1)
 
                 # wait until the title changes
                 for title in CHALLENGE_TITLES:
                     logging.debug(
-                        "Waiting for title (attempt " + str(attempt) + "): " + title
+                        f"[CHALLENGE] Waiting for title change (attempt {attempt}): '{title}'"
                     )
                     if tab.target.title != title:
                         continue
@@ -401,8 +461,10 @@ async def _evil_logic_nd(
                     while True:
                         current_title = tab.target.title
                         if current_title not in CHALLENGE_TITLES:
+                            logging.debug(f"[CHALLENGE] Title changed to: '{current_title}'")
                             break
                         if time.time() - start_time > SHORT_TIMEOUT:
+                            logging.debug(f"[CHALLENGE] Timeout waiting for title change")
                             raise TimeoutError
                         await tab.wait(0.1)
 
@@ -410,10 +472,7 @@ async def _evil_logic_nd(
                 for selector in CHALLENGE_SELECTORS:
                     await tab
                     logging.debug(
-                        "Waiting for selector (attempt "
-                        + str(attempt)
-                        + "): "
-                        + selector
+                        f"[CHALLENGE] Waiting for selector to disappear (attempt {attempt}): '{selector}'"
                     )
                     if (
                         await tab.query_selector(selector=selector, _node=doc)
@@ -425,55 +484,95 @@ async def _evil_logic_nd(
                                 selector=selector, _node=doc
                             )
                             if not element:
+                                logging.debug(f"[CHALLENGE] Selector disappeared: '{selector}'")
                                 break
                             if time.time() - start_time > SHORT_TIMEOUT:
+                                logging.debug(f"[CHALLENGE] Timeout waiting for selector to disappear")
                                 raise TimeoutError
                             del element
                             await asyncio.sleep(0.1)
 
                 # all elements not found
+                logging.debug("[CHALLENGE] All challenge elements cleared")
                 break
 
             except TimeoutError:
-                logging.debug("Timeout waiting for selector")
-
+                logging.debug(f"[CHALLENGE] Timeout on attempt {attempt}, trying to click verify...")
                 await click_verify_nd(tab)
 
         # waits until cloudflare redirection ends
-        logging.debug("Waiting for redirect")
+        logging.debug("[CHALLENGE] Waiting for final redirect...")
         # noinspection PyBroadException
         try:
             await tab
         except Exception:
-            logging.debug("Timeout waiting for redirect")
+            logging.debug("[CHALLENGE] Timeout waiting for redirect")
 
-        logging.info("Challenge solved!")
+        logging.info("[CHALLENGE] Challenge solved!")
         res.message = "Challenge solved!"
     else:
-        logging.info("Challenge not detected!")
+        logging.info("[CHALLENGE] Challenge not detected!")
         res.message = "Challenge not detected!"
+
+    logging.debug("[RESPONSE] Building response object...")
 
     challenge_res = ChallengeResolutionResultT({})
     challenge_res.url = tab.target.url
-    challenge_res.status = STATUS_CODE
+    logging.debug(f"[RESPONSE] Final URL: {challenge_res.url}")
+
+    challenge_res.status = captured_status_code
+    logging.debug(f"[RESPONSE] Status code: {challenge_res.status}")
+
+    logging.debug("[RESPONSE] Retrieving cookies...")
     challenge_res.cookies = await driver.cookies.get_all(requests_cookie_format=True)
+    logging.debug(f"[RESPONSE] Retrieved {len(challenge_res.cookies)} cookies")
+
+    logging.debug("[RESPONSE] Retrieving user agent...")
     challenge_res.userAgent = await utils.get_user_agent_nd(driver)
+    logging.debug(f"[RESPONSE] User agent: {challenge_res.userAgent}")
 
     if not req.returnOnlyCookies:
-        challenge_res.headers = (
-            {}
-        )  # TO-DO: nodriver should support this, let's add it later
+        if network_enabled:
+            challenge_res.headers = captured_response_headers
+            logging.debug(f"[RESPONSE] Headers: {len(challenge_res.headers)} headers captured")
+            if captured_response_url and captured_response_url != req.url:
+                logging.debug(f"[RESPONSE] Note: Final URL differs from requested (redirect occurred)")
+        else:
+            challenge_res.headers = {}
+            logging.debug("[RESPONSE] Headers: not captured (network monitoring unavailable)")
+
+        logging.debug("[RESPONSE] Retrieving page content...")
         challenge_res.response = await tab.get_content(_node=doc)
+        content_length = len(challenge_res.response) if challenge_res.response else 0
+        logging.debug(f"[RESPONSE] Page content length: {content_length} chars")
+
+        # Log first 500 chars of content for debugging
+        if challenge_res.response and content_length > 0:
+            preview = challenge_res.response[:500].replace('\n', ' ').replace('\r', '')
+            logging.debug(f"[RESPONSE] Content preview: {preview}...")
+        elif content_length == 0:
+            logging.warning("[RESPONSE] Warning: Page content is empty!")
+
+    # Remove network handler before closing to prevent memory leaks
+    if network_enabled:
+        try:
+            tab.handlers.pop(utils.nd.cdp.network.ResponseReceived, None)
+            logging.debug("[CLEANUP] Response handler removed")
+        except Exception as e:
+            logging.debug(f"[CLEANUP] Handler removal note: {e}")
 
     # Close websocket connection
     # to reuse the driver tab
     if req.session:
+        logging.debug("[CLEANUP] Closing tab websocket (session mode)...")
         await tab.aclose()
     else:
+        logging.debug("[CLEANUP] Closing tab...")
         await tab.close()
-        logging.debug("Tab was closed")
+        logging.debug("[CLEANUP] Tab was closed")
 
     res.result = challenge_res
+    logging.debug("[RESPONSE] Response object built successfully")
     return res
 
 

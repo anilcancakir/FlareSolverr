@@ -834,7 +834,10 @@ class Tab(Connection):
     async def evaluate(
         self, expression: str, await_promise=False, return_by_value=True
     ):
-        remote_object, errors = await self.send(
+        expr_preview = expression[:100] + "..." if len(expression) > 100 else expression
+        logger.debug(f"[TAB] evaluate called: {expr_preview}")
+
+        result = await self.send(
             cdp.runtime.evaluate(
                 expression=expression,
                 user_gesture=True,
@@ -843,16 +846,39 @@ class Tab(Connection):
                 allow_unsafe_eval_blocked_by_csp=True,
             )
         )
+
+        # Handle None result
+        if result is None:
+            logger.warning("[TAB] evaluate: CDP returned None")
+            return None
+
+        # Unpack result
+        if isinstance(result, tuple) and len(result) == 2:
+            remote_object, errors = result
+        else:
+            logger.debug(f"[TAB] evaluate: Unexpected result type: {type(result)}")
+            remote_object = result
+            errors = None
+
+        logger.debug(f"[TAB] evaluate: remote_object={remote_object is not None}, errors={errors is not None}")
+
         if errors:
+            logger.warning(f"[TAB] evaluate: Errors: {errors}")
             raise ProtocolException(errors)
 
         if remote_object:
+            logger.debug(f"[TAB] evaluate: remote_object.type={remote_object.type_ if hasattr(remote_object, 'type_') else 'N/A'}")
             if return_by_value:
-                if remote_object.value:
-                    return remote_object.value
-
+                value = getattr(remote_object, 'value', None)
+                if value is not None:
+                    logger.debug(f"[TAB] evaluate: Returning value type={type(value).__name__}")
+                    return value
+                else:
+                    logger.debug("[TAB] evaluate: remote_object.value is None")
             else:
                 return remote_object, errors
+
+        logger.debug("[TAB] evaluate: No value to return")
 
     async def js_dumps(
         self, obj_name: str, return_by_value: Optional[bool] = True
@@ -1062,15 +1088,37 @@ class Tab(Connection):
         :return:
         :rtype:
         """
+        logger.debug(f"[TAB] get_content called, _node provided: {_node is not None}")
         if not _node:
+            logger.debug("[TAB] get_content: Fetching document...")
             doc: cdp.dom.Node = await self.send(cdp.dom.get_document(-1, True))
+            logger.debug(f"[TAB] get_content: Document fetched: {doc is not None}")
+            if doc:
+                logger.debug(f"[TAB] get_content: Document node_id={doc.node_id}, backend_node_id={doc.backend_node_id}")
         else:
             doc = _node
+            logger.debug(f"[TAB] get_content: Using provided node, node_name={_node.node_name}")
             if _node.node_name == "IFRAME":
                 doc = _node.content_document
-        return await self.send(
+                logger.debug(f"[TAB] get_content: Using IFRAME content_document")
+
+        if not doc:
+            logger.warning("[TAB] get_content: Document is None, cannot get outer HTML")
+            return None
+
+        if not doc.backend_node_id:
+            logger.warning(f"[TAB] get_content: Document has no backend_node_id")
+            return None
+
+        logger.debug(f"[TAB] get_content: Getting outer HTML for backend_node_id={doc.backend_node_id}")
+        result = await self.send(
             cdp.dom.get_outer_html(backend_node_id=doc.backend_node_id)
         )
+        if result:
+            logger.debug(f"[TAB] get_content: Got {len(result)} chars of HTML")
+        else:
+            logger.warning("[TAB] get_content: get_outer_html returned None")
+        return result
 
     async def maximize(self):
         """

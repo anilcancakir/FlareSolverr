@@ -111,12 +111,18 @@ class Transaction(asyncio.Future):
 
         if "error" in response:
             # set exception and bail out
+            logger.debug(f"[CDP-TX] Error response for {self.method}: {response['error']}")
             return self.set_exception(ProtocolException(response["error"]))
         try:
             # try to parse the result according to the py cdp docs.
+            result_preview = str(response.get("result", {}))
+            if len(result_preview) > 300:
+                result_preview = result_preview[:300] + "..."
+            logger.debug(f"[CDP-TX] Parsing result for {self.method}: {result_preview}")
             self.__cdp_obj__.send(response["result"])
         except StopIteration as e:
             # exception value holds the parsed response
+            logger.debug(f"[CDP-TX] Completed {self.method}: result type={type(e.value).__name__}")
             return self.set_result(e.value)
         raise ProtocolException("could not parse the cdp response:\n%s" % response)
 
@@ -404,6 +410,7 @@ class Connection(metaclass=CantTouchThis):
         """
         await self.aopen()
         if not self.websocket or bool(self.websocket.close_code):
+            logger.debug("[CDP] Websocket not available or closed")
             return
         if self._owner:
             browser = self._owner
@@ -424,15 +431,36 @@ class Connection(metaclass=CantTouchThis):
 
             tx.id = next(self.__count__)
             self.mapper.update({tx.id: tx})
+
+            logger.debug(f"[CDP] Sending command: {tx.method} (id: {tx.id})")
+            if tx.params:
+                # Log params but truncate long values
+                params_str = str(tx.params)
+                if len(params_str) > 200:
+                    params_str = params_str[:200] + "..."
+                logger.debug(f"[CDP] Command params: {params_str}")
+
             if not _is_update:
                 await self._register_handlers()
             await self.websocket.send(tx.message)
             try:
-                return await tx
+                result = await tx
+                # Log result type and summary
+                if result is not None:
+                    result_type = type(result).__name__
+                    result_str = str(result)
+                    if len(result_str) > 200:
+                        result_str = result_str[:200] + "..."
+                    logger.debug(f"[CDP] Response for {tx.method}: type={result_type}, value={result_str}")
+                else:
+                    logger.debug(f"[CDP] Response for {tx.method}: None")
+                return result
             except ProtocolException as e:
+                logger.warning(f"[CDP] Protocol exception for {tx.method}: {e.message}")
                 e.message += f"\ncommand:{tx.method}\nparams:{tx.params}"
                 raise e
-        except Exception:
+        except Exception as ex:
+            logger.debug(f"[CDP] Exception during send: {type(ex).__name__}: {ex}")
             await self.aclose()
 
     #

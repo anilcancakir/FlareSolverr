@@ -288,13 +288,9 @@ def find_chrome_executable(return_all=False):
     rv = []
     for candidate in candidates:
         if os.path.exists(candidate) and os.access(candidate, os.X_OK):
-            logger.debug("%s is a valid candidate... " % candidate)
+            logger.debug("Found chrome executable: %s" % candidate)
             rv.append(candidate)
-        else:
-            logger.debug(
-                "%s is not a valid candidate because don't exist or not executable "
-                % candidate
-            )
+        # Note: Not logging invalid candidates to reduce noise
 
     winner = None
 

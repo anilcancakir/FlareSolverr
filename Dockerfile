@@ -32,10 +32,19 @@ WORKDIR /app
     # Install dummy packages
 RUN dpkg -i /libgl1-mesa-dri.deb \
     && dpkg -i /adwaita-icon-theme.deb \
-    # Install dependencies
-    && apt-get update \
-    && apt-get install -y --no-install-recommends chromium chromium-common chromium-driver xvfb dumb-init \
-        procps curl vim xauth \
+    # Add Debian snapshot repository for Chromium 133 (newer versions have CDP issues)
+    # Chromium 133.0.6943.126-1~deb12u1 was added to debian-security on Feb 21, 2025
+    && echo 'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/20250222T000000Z bookworm-security main' > /etc/apt/sources.list.d/snapshot.list \
+    && apt-get update -o Acquire::Check-Valid-Until=false \
+    && apt-get install -y --no-install-recommends \
+        chromium=133.0.6943.126-1~deb12u1 \
+        chromium-common=133.0.6943.126-1~deb12u1 \
+        chromium-driver=133.0.6943.126-1~deb12u1 \
+        xvfb dumb-init procps curl vim xauth \
+    # Hold chromium packages to prevent accidental upgrades
+    && apt-mark hold chromium chromium-common chromium-driver \
+    # Remove snapshot repo after install (use regular repos for other updates)
+    && rm /etc/apt/sources.list.d/snapshot.list \
     # Remove temporary files and hardware decoding libraries
     && rm -rf /var/lib/apt/lists/* \
     && rm -f /usr/lib/x86_64-linux-gnu/libmfxhw* \

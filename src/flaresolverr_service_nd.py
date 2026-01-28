@@ -381,7 +381,15 @@ async def _evil_logic_nd(
     logging.debug(f"[NAVIGATION] Method: {method}")
 
     # Always open blank page first to enable network monitoring
-    tab = await driver.get("about:blank")
+    # Add timeout to prevent hanging on stuck sessions
+    try:
+        tab = await asyncio.wait_for(
+            driver.get("about:blank"),
+            timeout=15.0
+        )
+    except asyncio.TimeoutError:
+        logging.warning("[NAVIGATION] Timeout opening blank page, browser may be stuck")
+        raise Exception("Browser session is stuck. Try destroying and recreating the session.")
 
     # Enable network monitoring with error handling
     try:
@@ -418,8 +426,15 @@ async def _evil_logic_nd(
         logging.debug(f"[NAVIGATION] POST content generated, length: {len(post_content)} chars")
         await tab.get("data:text/html;charset=utf-8," + post_content)
     else:
-        # GET or JSON POST: navigate to URL directly
-        await tab.get(req.url)
+        # GET or JSON POST: navigate to URL directly with timeout
+        try:
+            await asyncio.wait_for(
+                tab.get(req.url),
+                timeout=30.0
+            )
+        except asyncio.TimeoutError:
+            logging.warning(f"[NAVIGATION] Timeout navigating to {req.url}")
+            raise Exception("Navigation timeout. The page took too long to respond.")
 
     logging.debug(f"[NAVIGATION] Navigation completed, tab target: {tab.target.target_id if tab.target else 'None'}")
     logging.debug(f"[NAVIGATION] Tab URL: {tab.target.url if tab.target else 'None'}")

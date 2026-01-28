@@ -1,5 +1,10 @@
 # Changelog
 
+## v3.5.4 (2026/01/28)
+
+* Fixed navigation timeout: Added 15s timeout for blank page and 30s timeout for URL navigation to prevent stuck sessions
+* Better error messages when browser session is stuck or page takes too long to respond
+
 ## v3.5.3 (2026/01/28)
 
 * Fixed JSON POST to include custom headers in fetch requests

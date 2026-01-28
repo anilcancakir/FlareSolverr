@@ -51,8 +51,7 @@ already included within the image.
 
 Docker images are available in:
 
-* GitHub Registry => https://github.com/orgs/FlareSolverr/packages/container/package/flaresolverr
-* DockerHub => https://hub.docker.com/r/flaresolverr/flaresolverr
+* DockerHub => https://hub.docker.com/r/anilcancakir/flaresolverr
 
 Supported architectures are:
 
@@ -76,7 +75,7 @@ docker run -d \
   -p 8191:8191 \
   -e LOG_LEVEL=info \
   --restart unless-stopped \
-  ghcr.io/flaresolverr/flaresolverr:latest
+  anilcancakir/flaresolverr:latest
 ```
 
 If your host OS is Debian, make sure `libseccomp2` version is 2.5.x. You can check the version with `sudo apt-cache policy libseccomp2`
@@ -302,7 +301,36 @@ This is the same as `request.get` but it takes one more param:
 
 | Parameter | Notes                                                                   |
 | ----------- | ------------------------------------------------------------------------- |
-| postData  | Must be a string with`application/x-www-form-urlencoded`. Eg: `a=b&c=d` |
+| postData  | Can be a string (form-urlencoded) or an object (JSON). See examples below. |
+
+**Form-urlencoded POST** (string):
+```bash
+curl -X POST 'http://localhost:8191/v1' \
+-H 'Content-Type: application/json' \
+-d '{
+  "cmd": "request.post",
+  "url": "https://httpbin.org/post",
+  "postData": "username=test&password=secret&remember=true"
+}'
+```
+
+**JSON POST** (object):
+```bash
+curl -X POST 'http://localhost:8191/v1' \
+-H 'Content-Type: application/json' \
+-d '{
+  "cmd": "request.post",
+  "url": "https://httpbin.org/post",
+  "postData": {
+    "username": "test",
+    "password": "secret",
+    "data": {
+      "nested": "value",
+      "array": [1, 2, 3]
+    }
+  }
+}'
+```
 
 ## Environment variables
 
@@ -368,6 +396,14 @@ FlareSolverr can be customized to solve the CAPTCHA automatically by setting the
 to the file name of one of the adapters inside the [/captcha](src/captcha) directory.
 
 ## Changelog
+
+### v3.5.1
+- Added JSON POST support: `postData` now accepts both string (form-urlencoded) and object (JSON)
+- JSON requests are sent with `Content-Type: application/json` header automatically
+- **Navigate-then-fetch approach**: JSON POST navigates to target URL first (solves challenge), then executes fetch on same-origin
+  - Proper `Origin` header (not "null")
+  - `Sec-Fetch-Site: same-origin` for Cloudflare compatibility
+  - Cookies and headers preserved from challenge resolution
 
 ### v3.5.0
 This release is based on [upstream v3.4.x](https://github.com/FlareSolverr/FlareSolverr) with [21hsmw's nodriver implementation](https://github.com/21hsmw/FlareSolverr) and additional enhancements.

@@ -1,0 +1,153 @@
+# FlareSolverr API Reference for LLMs
+
+> FlareSolverr is a proxy server that bypasses Cloudflare protection using a headless browser.
+> Base URL: http://localhost:8191 (default)
+
+## Quick Start
+
+All requests are POST to `/v1` with JSON body containing `cmd` field.
+
+## Commands
+
+### 1. request.get - Fetch a URL
+
+```json
+{
+  "cmd": "request.get",
+  "url": "https://example.com",
+  "maxTimeout": 60000
+}
+```
+
+### 2. request.post - POST with Form Data (string)
+
+```json
+{
+  "cmd": "request.post",
+  "url": "https://example.com/login",
+  "maxTimeout": 60000,
+  "postData": "username=test&password=secret"
+}
+```
+
+### 3. request.post - POST with JSON Data (object)
+
+```json
+{
+  "cmd": "request.post",
+  "url": "https://api.example.com/data",
+  "maxTimeout": 60000,
+  "postData": {
+    "username": "test",
+    "data": {"nested": "value"}
+  }
+}
+```
+
+### 4. sessions.create - Create Persistent Session
+
+```json
+{
+  "cmd": "sessions.create"
+}
+```
+
+### 5. sessions.list - List Active Sessions
+
+```json
+{
+  "cmd": "sessions.list"
+}
+```
+
+### 6. sessions.destroy - Destroy Session
+
+```json
+{
+  "cmd": "sessions.destroy",
+  "session": "session_id_here"
+}
+```
+
+## Request Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| cmd | string | Yes | Command: request.get, request.post, sessions.create, sessions.list, sessions.destroy |
+| url | string | Yes* | Target URL (*required for request.get/post) |
+| maxTimeout | int | No | Timeout in ms (default: 60000) |
+| postData | string/object | No | POST data: string for form-urlencoded, object for JSON |
+| cookies | array | No | Cookies to send: [{"name": "x", "value": "y", "domain": ".example.com"}] |
+| headers | object | No | Custom headers: {"X-Custom": "value"} |
+| session | string | No | Session ID for persistent browser |
+| returnOnlyCookies | bool | No | Only return cookies, not HTML |
+| proxy | object | No | Proxy config: {"url": "http://proxy:8080"} |
+
+## Response Structure
+
+```json
+{
+  "status": "ok",
+  "message": "Challenge solved!",
+  "solution": {
+    "url": "https://example.com/final-url",
+    "status": 200,
+    "headers": {"content-type": "text/html"},
+    "response": "<html>...</html>",
+    "cookies": [
+      {"name": "cf_clearance", "value": "...", "domain": ".example.com"}
+    ],
+    "userAgent": "Mozilla/5.0..."
+  },
+  "startTimestamp": 1234567890,
+  "endTimestamp": 1234567899,
+  "version": "3.5.1"
+}
+```
+
+## Common Patterns
+
+### Bypass Cloudflare and Extract Content
+
+```bash
+curl -X POST http://localhost:8191/v1 \
+  -H "Content-Type: application/json" \
+  -d '{"cmd":"request.get","url":"https://protected-site.com","maxTimeout":60000}'
+```
+
+### Reuse Cookies for Subsequent Requests
+
+1. First request gets cookies from FlareSolverr
+2. Use returned `cookies` and `userAgent` in your HTTP client
+3. Important: User-Agent must match or Cloudflare will block
+
+### Session Workflow (Multiple Requests)
+
+```bash
+# Create session
+curl -X POST http://localhost:8191/v1 -d '{"cmd":"sessions.create"}'
+# Returns: {"session": "abc123", ...}
+
+# Use session for requests
+curl -X POST http://localhost:8191/v1 -d '{"cmd":"request.get","url":"https://site.com","session":"abc123"}'
+
+# Destroy when done
+curl -X POST http://localhost:8191/v1 -d '{"cmd":"sessions.destroy","session":"abc123"}'
+```
+
+## Error Handling
+
+| Status | Message | Meaning |
+|--------|---------|---------|
+| ok | Challenge solved! | Cloudflare bypassed |
+| ok | Challenge not detected! | No protection found |
+| error | Timeout | maxTimeout exceeded |
+| error | Cloudflare has blocked this request | IP banned |
+
+## Tips for LLMs
+
+1. Always use `maxTimeout` of at least 60000ms for Cloudflare sites
+2. For JSON APIs behind Cloudflare, use `postData` as object (not string)
+3. Save and reuse `userAgent` from response - it must match for cookie reuse
+4. Sessions are useful for multi-step workflows (login, then scrape)
+5. Response HTML is in `solution.response` field

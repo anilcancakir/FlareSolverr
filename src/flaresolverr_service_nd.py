@@ -328,11 +328,17 @@ async def _evil_logic_nd(
             logging.warning(f"[HEADERS] Failed to set custom headers: {e}")
 
     # Navigate to actual URL
-    if method == "POST":
+    # For JSON POST (dict postData): navigate normally, fetch after challenge
+    # For form POST (string postData): use data: URL with form submit
+    is_json_post = method == "POST" and isinstance(req.postData, dict)
+
+    if method == "POST" and not is_json_post:
+        # Form-urlencoded POST: use existing data: URL approach
         post_content = await _post_request_nd(req)
         logging.debug(f"[NAVIGATION] POST content generated, length: {len(post_content)} chars")
         await tab.get("data:text/html;charset=utf-8," + post_content)
     else:
+        # GET or JSON POST: navigate to URL directly
         await tab.get(req.url)
 
     logging.debug(f"[NAVIGATION] Navigation completed, tab target: {tab.target.target_id if tab.target else 'None'}")
@@ -376,7 +382,7 @@ async def _evil_logic_nd(
         logging.debug(f"[COOKIES] Set {len(cookies)} cookies successfully")
 
         # reload the page
-        if method == "POST":
+        if method == "POST" and not is_json_post:
             tab = await driver.get(post_content)
         else:
             logging.debug("[NAVIGATION] Reloading tab after cookie injection...")
@@ -514,6 +520,46 @@ async def _evil_logic_nd(
         logging.info("[CHALLENGE] Challenge not detected!")
         res.message = "Challenge not detected!"
 
+    # For JSON POST: execute fetch after challenge is solved (same-origin request)
+    if is_json_post:
+        import json
+        logging.info("[JSON POST] Executing fetch request after challenge resolution...")
+        json_data = json.dumps(req.postData)
+        # Escape for JavaScript string
+        json_data_escaped = json_data.replace('\\', '\\\\').replace("'", "\\'").replace('\n', '\\n').replace('\r', '\\r')
+
+        fetch_script = f"""
+        (async () => {{
+            try {{
+                const response = await fetch('{req.url}', {{
+                    method: 'POST',
+                    headers: {{
+                        'Content-Type': 'application/json'
+                    }},
+                    body: '{json_data_escaped}'
+                }});
+                const text = await response.text();
+                document.open();
+                document.write(text);
+                document.close();
+                return 'success';
+            }} catch (error) {{
+                return 'error: ' + error.message;
+            }}
+        }})()
+        """
+
+        try:
+            result = await tab.evaluate(fetch_script)
+            logging.debug(f"[JSON POST] Fetch result: {result}")
+            # Wait for DOM to update
+            await tab.wait(1)
+            # Refresh doc reference after DOM change
+            doc = await tab.send(utils.nd.cdp.dom.get_document(-1, True))
+            logging.info("[JSON POST] Fetch completed successfully")
+        except Exception as e:
+            logging.warning(f"[JSON POST] Fetch failed: {e}")
+
     logging.debug("[RESPONSE] Building response object...")
 
     challenge_res = ChallengeResolutionResultT({})
@@ -618,26 +664,62 @@ async def click_verify_nd(tab: Tab):
 
 
 async def _post_request_nd(req: V1RequestBase) -> str:
-    post_form = f'<form id="hackForm" action="{req.url}" method="POST">'
-    query_string = req.postData if req.postData[0] != "?" else req.postData[1:]
-    pairs = query_string.split("&")
-    for pair in pairs:
-        parts = pair.split("=")
-        # noinspection PyBroadException
-        try:
-            name = unquote(parts[0])
-        except Exception:
-            name = parts[0]
-        if name == "submit":
-            continue
-        # noinspection PyBroadException
-        try:
-            value = unquote(parts[1])
-        except Exception:
-            value = parts[1]
-        post_form += f'<input type="text" name="{name}" value="{value}"><br>'
-    post_form += "</form>"
-    html_content = f"""
+    import json
+
+    # Check if postData is a dict (JSON) or string (form-urlencoded)
+    if isinstance(req.postData, dict):
+        # JSON POST using fetch API
+        json_data = json.dumps(req.postData)
+        # Escape for JavaScript string
+        json_data_escaped = json_data.replace('\\', '\\\\').replace("'", "\\'").replace('\n', '\\n')
+
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head><meta charset="utf-8"></head>
+        <body>
+            <div id="result">Sending JSON POST request...</div>
+            <script>
+                fetch('{req.url}', {{
+                    method: 'POST',
+                    headers: {{
+                        'Content-Type': 'application/json'
+                    }},
+                    body: '{json_data_escaped}'
+                }})
+                .then(response => response.text())
+                .then(data => {{
+                    document.body.innerHTML = data;
+                }})
+                .catch(error => {{
+                    document.getElementById('result').innerText = 'Error: ' + error;
+                }});
+            </script>
+        </body>
+        </html>"""
+        logging.debug(f"[POST] Sending JSON request to {req.url}")
+    else:
+        # Form-urlencoded POST (original behavior)
+        post_form = f'<form id="hackForm" action="{req.url}" method="POST">'
+        query_string = req.postData if req.postData[0] != "?" else req.postData[1:]
+        pairs = query_string.split("&")
+        for pair in pairs:
+            parts = pair.split("=")
+            # noinspection PyBroadException
+            try:
+                name = unquote(parts[0])
+            except Exception:
+                name = parts[0]
+            if name == "submit":
+                continue
+            # noinspection PyBroadException
+            try:
+                value = unquote(parts[1])
+            except Exception:
+                value = parts[1]
+            post_form += f'<input type="text" name="{name}" value="{value}"><br>'
+        post_form += "</form>"
+        html_content = f"""
         <!DOCTYPE html>
         <html>
         <body>
@@ -645,5 +727,6 @@ async def _post_request_nd(req: V1RequestBase) -> str:
             <script>document.getElementById('hackForm').submit();</script>
         </body>
         </html>"""
+        logging.debug(f"[POST] Sending form-urlencoded request to {req.url}")
 
     return html_content

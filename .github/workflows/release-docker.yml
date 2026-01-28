@@ -13,14 +13,11 @@ jobs:
         name: Checkout
         uses: actions/checkout@v3
       -
-        name: Downcase repo
-        run: echo REPOSITORY=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]') >> $GITHUB_ENV
-      -
         name: Docker meta
         id: docker_meta
         uses: crazy-max/ghaction-docker-meta@v3
         with:
-          images: ${{ env.REPOSITORY }},ghcr.io/${{ env.REPOSITORY }}
+          images: anilcancakir/flaresolverr
           tag-sha: false
       -
         name: Set up QEMU
@@ -34,13 +31,6 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      -
-        name: Login to GitHub Container Registry
-        uses: docker/login-action@v2
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GH_PAT }}
       -
         name: Build and push
         uses: docker/build-push-action@v3

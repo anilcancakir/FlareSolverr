@@ -218,6 +218,40 @@ session. When you no longer need to use a session you should make sure to close 
 | ----------- | ----------------------------------------------- |
 | session   | The session ID that you want to be destroyed. |
 
+#### + `sessions.update`
+
+Updates an existing session with additional cookies. Cookies are merged (same name+domain replaces existing).
+
+| Parameter | Notes                                                     |
+| --------- | --------------------------------------------------------- |
+| session   | Mandatory. The session ID to update.                      |
+| cookies   | Optional. Cookies to add/merge into session.              |
+
+Example request:
+
+```bash
+curl -X POST 'http://localhost:8191/v1' \
+-H 'Content-Type: application/json' \
+-d '{
+  "cmd": "sessions.update",
+  "session": "my-session-id",
+  "cookies": [
+    {"name": "auth", "value": "token123", "domain": ".example.com", "path": "/"}
+  ]
+}'
+```
+
+Example response:
+
+```json
+{
+  "status": "ok",
+  "message": "Session updated successfully.",
+  "session": "my-session-id",
+  "cookies": [...]
+}
+```
+
 #### + `request.get`
 
 

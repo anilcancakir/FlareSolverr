@@ -1,5 +1,11 @@
 # Changelog
 
+## v3.5.2 (2026/01/28)
+
+* Added `sessions.update` command: Add/merge cookies into existing sessions
+* Fixed `sessions.destroy` websocket timeout: Added 5s timeout to prevent infinite loop on cleanup
+* Cookie merge logic: Same name+domain cookies are replaced, others preserved
+
 ## v3.5.1 (2026/01/28)
 
 * Added JSON POST support: `postData` now accepts both string (form-urlencoded) and object (JSON)

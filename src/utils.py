@@ -530,13 +530,30 @@ async def after_run_cleanup(driver: nd.Browser):
     # Stop Browser instance
     driver.stop()
 
-    # Wait for the websocket to return True (Closed)
-    while True:
-        websocket_status = driver.connection.closed
-        logging.debug(f"Websocket closed status: {websocket_status}")
-        if websocket_status:
-            break
-        await asyncio.sleep(0.1)
+    # Wait for the websocket to return True (Closed) with timeout
+    max_wait = 5.0  # Maximum seconds to wait for websocket close
+    waited = 0.0
+    try:
+        while waited < max_wait:
+            # Check if connection exists and has closed attribute
+            if driver.connection is None:
+                logging.debug("Websocket connection is None, assuming closed")
+                break
+            try:
+                websocket_status = driver.connection.closed
+                logging.debug(f"Websocket closed status: {websocket_status}")
+                if websocket_status:
+                    break
+            except Exception as e:
+                logging.debug(f"Error checking websocket status: {e}")
+                break
+            await asyncio.sleep(0.1)
+            waited += 0.1
+
+        if waited >= max_wait:
+            logging.debug(f"Websocket close timeout after {max_wait}s, forcing cleanup")
+    except Exception as e:
+        logging.debug(f"Websocket cleanup error: {e}")
 
     # Explicitly wait for main process to terminate to avoid event loop closed errors
     try:

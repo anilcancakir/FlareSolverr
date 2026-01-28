@@ -69,6 +69,18 @@ All requests are POST to `/v1` with JSON body containing `cmd` field.
 }
 ```
 
+### 7. sessions.update - Update Session Cookies
+
+```json
+{
+  "cmd": "sessions.update",
+  "session": "session_id_here",
+  "cookies": [
+    {"name": "auth", "value": "token", "domain": ".example.com", "path": "/"}
+  ]
+}
+```
+
 ## Request Parameters
 
 | Parameter | Type | Required | Description |
@@ -101,7 +113,7 @@ All requests are POST to `/v1` with JSON body containing `cmd` field.
   },
   "startTimestamp": 1234567890,
   "endTimestamp": 1234567899,
-  "version": "3.5.1"
+  "version": "3.5.2"
 }
 ```
 

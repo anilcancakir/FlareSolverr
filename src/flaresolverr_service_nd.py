@@ -131,6 +131,8 @@ async def _controller_v1_handler_nd(req: V1RequestBase) -> V1ResponseBase:
         res = await _cmd_request_get_nd(req)
     elif req.cmd == "request.post":
         res = await _cmd_request_post_nd(req)
+    elif req.cmd == "sessions.update":
+        res = await _cmd_sessions_update_nd(req)
     else:
         raise Exception(f"Request parameter 'cmd' = '{req.cmd}' is invalid.")
 
@@ -223,6 +225,84 @@ async def _cmd_sessions_destroy_nd(req: V1RequestBase) -> V1ResponseBase:
     return V1ResponseBase(
         {"status": STATUS_OK, "message": "The session has been removed."}
     )
+
+
+async def _cmd_sessions_update_nd(req: V1RequestBase) -> V1ResponseBase:
+    """Update session with additional cookies (merge mode)"""
+    session_id = req.session
+
+    if not session_id:
+        raise Exception("Session ID is required.")
+
+    if not SESSIONS_STORAGE.exists(session_id):
+        raise Exception("The session doesn't exist.")
+
+    session = SESSIONS_STORAGE.sessions[session_id]
+    driver = session.driver
+
+    # Ensure we have an active tab for cookie operations
+    tab = await driver.get("about:blank")
+
+    # Get existing cookies (returns list of dicts with requests_cookie_format=True)
+    existing_cookies = await driver.cookies.get_all(requests_cookie_format=True)
+
+    # Merge: existing + new (new overrides same name+domain)
+    if req.cookies and len(req.cookies) > 0:
+        cookie_map = {}
+
+        # Add existing cookies to map
+        for c in existing_cookies:
+            # Handle both dict and Cookie object
+            if isinstance(c, dict):
+                name = c.get('name', '')
+                domain = c.get('domain', '')
+            else:
+                name = getattr(c, 'name', '')
+                domain = getattr(c, 'domain', '')
+            key = f"{name}:{domain}"
+            cookie_map[key] = c
+
+        # Add/override with new cookies
+        for c in req.cookies:
+            key = f"{c['name']}:{c.get('domain', '')}"
+            cookie_map[key] = c
+
+        # Convert to CookieParam and set
+        cookie_params = []
+        for c in cookie_map.values():
+            if isinstance(c, dict):
+                cookie_params.append(
+                    utils.nd.cdp.network.CookieParam(
+                        name=c["name"],
+                        value=c["value"],
+                        path=c.get("path", "/"),
+                        domain=c.get("domain", ""),
+                    )
+                )
+            else:
+                cookie_params.append(
+                    utils.nd.cdp.network.CookieParam(
+                        name=c.name,
+                        value=c.value,
+                        path=getattr(c, 'path', '/'),
+                        domain=getattr(c, 'domain', ''),
+                    )
+                )
+
+        await driver.cookies.set_all(cookie_params)
+
+    # Get updated cookies for response
+    final_cookies = await driver.cookies.get_all(requests_cookie_format=True)
+
+    # Close the tab websocket to allow reuse
+    await tab.aclose()
+
+    return V1ResponseBase({
+        "status": STATUS_OK,
+        "message": "Session updated successfully.",
+        "session": session_id,
+        "cookies": final_cookies,
+    })
 
 
 async def _resolve_challenge_nd(

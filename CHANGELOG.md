@@ -1,5 +1,11 @@
 # Changelog
 
+## v3.5.3 (2026/01/28)
+
+* Fixed JSON POST to include custom headers in fetch requests
+* Fixed cookie retrieval timeout: Added 10s timeout to prevent hanging in session mode
+* Fixed JSON API responses: Extract clean JSON from HTML wrapper when content-type is application/json
+
 ## v3.5.2 (2026/01/28)
 
 * Added `sessions.update` command: Add/merge cookies into existing sessions

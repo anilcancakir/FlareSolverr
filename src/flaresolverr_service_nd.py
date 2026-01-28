@@ -608,14 +608,21 @@ async def _evil_logic_nd(
         # Escape for JavaScript string
         json_data_escaped = json_data.replace('\\', '\\\\').replace("'", "\\'").replace('\n', '\\n').replace('\r', '\\r')
 
+        # Build headers object including custom headers from request
+        fetch_headers = {'Content-Type': 'application/json'}
+        if req.headers:
+            fetch_headers.update(req.headers)
+
+        # Convert headers to JavaScript object string
+        headers_js = json.dumps(fetch_headers)
+        logging.debug(f"[JSON POST] Fetch headers: {fetch_headers}")
+
         fetch_script = f"""
         (async () => {{
             try {{
                 const response = await fetch('{req.url}', {{
                     method: 'POST',
-                    headers: {{
-                        'Content-Type': 'application/json'
-                    }},
+                    headers: {headers_js},
                     body: '{json_data_escaped}'
                 }});
                 const text = await response.text();
@@ -650,8 +657,15 @@ async def _evil_logic_nd(
     logging.debug(f"[RESPONSE] Status code: {challenge_res.status}")
 
     logging.debug("[RESPONSE] Retrieving cookies...")
-    challenge_res.cookies = await driver.cookies.get_all(requests_cookie_format=True)
-    logging.debug(f"[RESPONSE] Retrieved {len(challenge_res.cookies)} cookies")
+    try:
+        challenge_res.cookies = await asyncio.wait_for(
+            driver.cookies.get_all(requests_cookie_format=True),
+            timeout=10.0
+        )
+        logging.debug(f"[RESPONSE] Retrieved {len(challenge_res.cookies)} cookies")
+    except asyncio.TimeoutError:
+        logging.warning("[RESPONSE] Cookie retrieval timed out, returning empty cookies")
+        challenge_res.cookies = []
 
     logging.debug("[RESPONSE] Retrieving user agent...")
     challenge_res.userAgent = await utils.get_user_agent_nd(driver)
@@ -671,6 +685,16 @@ async def _evil_logic_nd(
         challenge_res.response = await tab.get_content(_node=doc)
         content_length = len(challenge_res.response) if challenge_res.response else 0
         logging.debug(f"[RESPONSE] Page content length: {content_length} chars")
+
+        # Extract JSON from HTML wrapper if content-type is application/json
+        content_type = challenge_res.headers.get('content-type', '')
+        if 'application/json' in content_type and challenge_res.response:
+            import re
+            # Chrome wraps JSON in: <html>...<body><pre>JSON</pre>...</body></html>
+            match = re.search(r'<pre[^>]*>(.*?)</pre>', challenge_res.response, re.DOTALL)
+            if match:
+                challenge_res.response = match.group(1)
+                logging.debug("[RESPONSE] Extracted JSON from HTML wrapper")
 
         # Log first 500 chars of content for debugging
         if challenge_res.response and content_length > 0:

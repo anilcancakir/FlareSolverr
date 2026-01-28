@@ -113,7 +113,7 @@ All requests are POST to `/v1` with JSON body containing `cmd` field.
   },
   "startTimestamp": 1234567890,
   "endTimestamp": 1234567899,
-  "version": "3.5.2"
+  "version": "3.5.3"
 }
 ```
 

@@ -397,40 +397,7 @@ to the file name of one of the adapters inside the [/captcha](src/captcha) direc
 
 ## Changelog
 
-### v3.5.1
-- Added JSON POST support: `postData` now accepts both string (form-urlencoded) and object (JSON)
-- JSON requests are sent with `Content-Type: application/json` header automatically
-- **Navigate-then-fetch approach**: JSON POST navigates to target URL first (solves challenge), then executes fetch on same-origin
-  - Proper `Origin` header (not "null")
-  - `Sec-Fetch-Site: same-origin` for Cloudflare compatibility
-  - Cookies and headers preserved from challenge resolution
-
-### v3.5.0
-This release is based on [upstream v3.4.x](https://github.com/FlareSolverr/FlareSolverr) with [21hsmw's nodriver implementation](https://github.com/21hsmw/FlareSolverr) and additional enhancements.
-
-**New Features:**
-- Custom HTTP headers support via `headers` parameter
-- Response headers capture from server responses
-- Log truncation for long HTML content in debug output (100 chars with original length info)
-- Redirect URL tracking in debug logs
-
-**Improvements:**
-- nodriver as default solving method (async CDP-based)
-- Better browser process cleanup
-- Reduced browser path scanning log noise
-- Network handler cleanup to prevent memory leaks
-
-**Bug Fixes:**
-- Fixed "Event loop is closed" error on browser cleanup
-- Fixed captcha looping issue
-- Fixed cookies not being appended in browser
-
-**Based on 21hsmw's work:**
-- Full nodriver support with async CDP
-- Session management for nodriver
-- Windows headless support
-- Cloudflare Turnstile patcher extension
-- Cookie importation support
+See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ## Related Projects
 

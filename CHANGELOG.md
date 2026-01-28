@@ -1,5 +1,32 @@
 # Changelog
 
+## v3.5.1 (2026/01/28)
+
+* Added JSON POST support: `postData` now accepts both string (form-urlencoded) and object (JSON)
+* JSON requests are sent with `Content-Type: application/json` header automatically
+* Navigate-then-fetch approach: JSON POST navigates to target URL first (solves challenge), then executes fetch on same-origin
+* Docker Hub integration: `anilcancakir/flaresolverr`
+* Simplified GitHub workflows (manual tagging)
+* Added `llms.txt` for LLM-friendly API documentation
+
+## v3.5.0 (2026/01/28)
+
+This release is based on upstream v3.4.x with 21hsmw's nodriver implementation and additional enhancements.
+
+* Custom HTTP headers support via `headers` parameter
+* Response headers capture from server responses
+* Log truncation for long HTML content in debug output
+* Redirect URL tracking in debug logs
+* nodriver as default solving method (async CDP-based)
+* Better browser process cleanup
+* Fixed "Event loop is closed" error on browser cleanup
+* Fixed captcha looping issue
+* Fixed cookies not being appended in browser
+* Full nodriver support with async CDP (based on 21hsmw's work)
+* Session management for nodriver
+* Windows headless support
+* Cloudflare Turnstile patcher extension
+
 ## v3.4.0 (TBA)
 
 * Add nodriver support

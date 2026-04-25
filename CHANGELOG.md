@@ -1,5 +1,32 @@
 # Changelog
 
+## v3.6.0 (2026/04/26)
+
+Synced with upstream FlareSolverr v3.4.6. All custom features preserved.
+
+Custom features (preserved):
+* nodriver as default driver (`DRIVER=nodriver`)
+* Custom HTTP `headers` parameter
+* JSON POST support (`postData` as object)
+* `sessions.update` command (cookie merge)
+* Navigation timeout for stuck sessions
+* `llms.txt` for LLM-friendly API documentation
+* Docker Hub release: `anilcancakir/flaresolverr` (linux/amd64)
+* Chromium 133 pin (CDP compatibility)
+* Cloudflare Turnstile patcher extension
+
+Adopted from upstream:
+* `returnScreenshot`, `waitInSeconds`, `disableMedia` API parameters
+* Proxy ENV support (`PROXY_URL`, `PROXY_USERNAME`, `PROXY_PASSWORD`)
+* Log file support via `LOG_FILE` env
+* Turnstile captcha resolution via `tabs_till_verify`
+* Modern release workflow (`softprops/action-gh-release@v2`)
+* `--disable-features=DisableLoadExtensionCommandLineSwitch` for newer Chromium
+* `--disable-search-engine-choice-screen`
+* Removed `--auto-open-devtools-for-tabs` (per upstream bug fix)
+* UC patcher fixes (`Version` stringification)
+* Dependency bumps (waitress 3.0.2, requests 2.32.5, selenium 4.39.0, etc.)
+
 ## v3.5.4 (2026/01/28)
 
 * Fixed navigation timeout: Added 15s timeout for blank page and 30s timeout for URL navigation to prevent stuck sessions

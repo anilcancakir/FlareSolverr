@@ -52,7 +52,12 @@ RUN dpkg -i /libgl1-mesa-dri.deb \
     # Create flaresolverr user
     && useradd --home-dir /app --shell /bin/sh flaresolverr \
     && mv /usr/bin/chromedriver chromedriver \
-    && chown -R flaresolverr:flaresolverr .
+    && chown -R flaresolverr:flaresolverr . \
+    # Create config dir
+    && mkdir /config \
+    && chown flaresolverr:flaresolverr /config
+
+VOLUME /config
 
 # Install Python dependencies
 # COPY requirements.txt .
@@ -76,17 +81,17 @@ ENTRYPOINT ["/usr/bin/dumb-init", "--"]
 CMD ["/usr/local/bin/python", "-u", "/app/flaresolverr.py"]
 
 # Local build
-# docker build -t ngosang/flaresolverr:3.4.0 .
-# docker run -p 8191:8191 ngosang/flaresolverr:3.4.0
+# docker build -t anilcancakir/flaresolverr:3.5.4 .
+# docker run -p 8191:8191 anilcancakir/flaresolverr:3.5.4
 
 # Multi-arch build
 # docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
 # docker buildx create --use
-# docker buildx build -t ngosang/flaresolverr:3.4.0 --platform linux/386,linux/amd64,linux/arm/v7,linux/arm64/v8 .
+# docker buildx build -t anilcancakir/flaresolverr:3.5.4 --platform linux/amd64 .
 #   add --push to publish in DockerHub
 
 # Test multi-arch build
 # docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
 # docker buildx create --use
-# docker buildx build -t ngosang/flaresolverr:3.4.0 --platform linux/arm/v7 --load .
-# docker run -p 8191:8191 --platform linux/arm/v7 ngosang/flaresolverr:3.4.0
+# docker buildx build -t anilcancakir/flaresolverr:3.5.4 --platform linux/amd64 --load .
+# docker run -p 8191:8191 --platform linux/amd64 anilcancakir/flaresolverr:3.5.4

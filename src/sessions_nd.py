@@ -15,6 +15,7 @@ class Session:
     session_id: str
     driver: Browser
     created_at: datetime
+    proxy: Optional[dict] = None
 
     def lifetime(self) -> timedelta:
         return datetime.now() - self.created_at
@@ -56,7 +57,7 @@ class SessionsStorage:
         logging.debug(f"[SESSION] Creating new session: {session_id}")
         driver = await utils.get_webdriver_nd(proxy)
         created_at = datetime.now()
-        session = Session(session_id, driver, created_at)
+        session = Session(session_id, driver, created_at, proxy)
 
         self.sessions[session_id] = session
         logging.debug(f"[SESSION] Session created successfully: {session_id}")
@@ -86,19 +87,70 @@ class SessionsStorage:
         return True
 
     async def get(
-        self, session_id: str, ttl: Optional[timedelta] = None
+        self,
+        session_id: str,
+        ttl: Optional[timedelta] = None,
+        proxy: Optional[dict] = None,
     ) -> Tuple[Session, bool]:
+        """resolve the browser a request should run in.
+
+        The proxy argument is not decoration. This function used to call
+        create() with the session id alone, which meant both of its
+        browser-creating branches built an UNPROXIED browser: the branch
+        that runs when the id is unknown, and the branch that runs when
+        the session outlived its ttl. Neither said anything about it, so
+        the request egressed from the host's own address while every
+        response still reported success. Measured on 2026-08-25: a
+        request.get naming an unknown session with a dead proxy attached
+        returned the live page instead of a proxy error, and the browser
+        it silently minted then showed up healthy in sessions.list, so a
+        caller reconciling against that list kept reusing it.
+
+        So the proxy travels with the session now, and a recreate reuses
+        whatever the session was born with when the caller does not
+        name one.
+        """
         logging.debug(f"[SESSION] get() called: session_id={session_id}, ttl={ttl}")
-        session, fresh = await self.create(session_id)
+
+        if not self.exists(session_id):
+            logging.warning(
+                f"[SESSION] Unknown session {session_id}; creating it for this request. "
+                "The caller believed this browser already existed."
+            )
+
+        session, fresh = await self.create(session_id, proxy=proxy)
+
+        if not fresh:
+            self.guard_proxy_matches(session, proxy)
 
         if ttl is not None and not fresh and session.lifetime() > ttl:
             logging.debug(
                 f"[SESSION] Session's lifetime ({session.lifetime()}) has expired (ttl={ttl}), recreating..."
             )
-            session, fresh = await self.create(session_id, force_new=True)
+            session, fresh = await self.create(
+                session_id, proxy=proxy or session.proxy, force_new=True
+            )
 
         logging.debug(f"[SESSION] get() returning: session_id={session_id}, fresh={fresh}")
         return session, fresh
+
+    @staticmethod
+    def guard_proxy_matches(session: Session, proxy: Optional[dict]) -> None:
+        """refuse to serve a request through the wrong egress.
+
+        A caller naming both a session and a proxy is asserting both. If
+        the live browser was built on a different proxy we cannot honour
+        that assertion, and answering anyway is how a scrape ends up
+        reporting an address it never used. A caller that names no proxy
+        is expressing no opinion and gets the session as it stands.
+        """
+        if proxy is None or proxy == session.proxy:
+            return
+
+        raise Exception(
+            f"Session {session.session_id} is bound to a different proxy than the one "
+            "supplied with this request. Destroy the session and create it again."
+        )
 
     def session_ids(self) -> list[str]:
         return list(self.sessions.keys())

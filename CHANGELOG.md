@@ -1,5 +1,44 @@
 # Changelog
 
+## v3.6.1 (2026/08/25)
+
+Silent proxy bypass. A request that named a proxy could egress from the
+container's own address and still report success, with nothing in the
+log or the response to say so. Three independent causes, each measured
+against a live container using a deliberately unreachable proxy, where a
+bypass shows up as the real page instead of a proxy error.
+
+* The proxy travels with the session. `SessionsStorage.get()` built the
+  browser by calling `create()` with the session id alone, so both of its
+  browser-creating branches produced an unproxied browser: the one that
+  runs when the id is unknown (container restarted, session reaped) and
+  the one that runs when the session outlives `session_ttl_minutes`. The
+  browser it minted then appeared healthy in `sessions.list`, so a caller
+  reconciling against that list kept reusing it. Both driver backends.
+* A session refuses a request naming a different proxy than the one it
+  was built on, instead of answering through the wrong egress.
+* `--proxy-server` selects the proxy for every proxy now, credentials or
+  not. The bundled extension used to select it from a manifest v3 service
+  worker, which starts asynchronously: one navigation in three began
+  before the setting applied and went direct. The extension is now only
+  an auth provider, so losing that race produces an auth error rather
+  than a silent direct connection.
+* A main document that fails at the network layer is an error, not
+  `status: ok`. An unreachable proxy used to return HTTP 200 carrying
+  Chromium's own 254 KB `ERR_PROXY_CONNECTION_FAILED` page as the body,
+  which no caller could tell apart from the real site.
+* The proxy auth extension stays on disk for the browser's lifetime. It
+  was deleted immediately after launch, while a manifest v3 service
+  worker still needs those files to restart after going idle.
+* Browser teardown waits are bounded. Waitress gives each request its own
+  event loop, so tearing down a browser started under an earlier one
+  could block `process.wait()` forever and hold the worker thread. Seen
+  on the session TTL recreate.
+* `get_webdriver_nd` raises when the browser fails to start, instead of
+  logging the reason and then failing with an `UnboundLocalError`.
+* New `src/tests_sessions_nd.py`: browser-free coverage of the
+  session-to-proxy binding.
+
 ## v3.6.0 (2026/04/26)
 
 Synced with upstream FlareSolverr v3.4.6. All custom features preserved.

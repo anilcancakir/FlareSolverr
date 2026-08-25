@@ -6,7 +6,6 @@ import re
 import shutil
 import sys
 import tempfile
-import urllib.parse
 import asyncio
 import psutil
 
@@ -78,21 +77,31 @@ def get_current_platform() -> str:
 
 
 def create_proxy_extension(proxy: dict) -> str:
-    parsed_url = urllib.parse.urlparse(proxy["url"])
-    scheme = parsed_url.scheme
-    host = parsed_url.hostname
-    port = parsed_url.port
+    """Build the extension that answers the proxy's auth challenge.
+
+    It deliberately does not choose the proxy. Selection happens on the
+    command line (--proxy-server), which is in effect before the browser
+    opens its first socket.
+
+    This extension used to do both, calling chrome.proxy.settings.set()
+    from its service worker. A manifest v3 service worker starts
+    asynchronously, so navigation could begin before the setting applied,
+    and Chromium's default is a direct connection. Measured on the
+    2026-08-25 container with a deliberately dead proxy: one navigation
+    in three egressed directly and returned the live page, logging
+    nothing, while the other two failed at the proxy as they should.
+    Command-line selection has no such window, so the only thing left
+    racing is the credential listener, and losing that race produces an
+    auth error rather than a silent direct connection.
+    """
     username = proxy["username"]
     password = proxy["password"]
     manifest_json = """
     {
         "version": "1.0.0",
         "manifest_version": 3,
-        "name": "Chrome Proxy",
+        "name": "Chrome Proxy Auth",
         "permissions": [
-            "proxy",
-            "tabs",
-            "storage",
             "webRequest",
             "webRequestAuthProvider"
         ],
@@ -107,20 +116,6 @@ def create_proxy_extension(proxy: dict) -> str:
     """
 
     background_js = """
-    var config = {
-        mode: "fixed_servers",
-        rules: {
-            singleProxy: {
-                scheme: "%s",
-                host: "%s",
-                port: %d
-            },
-            bypassList: ["localhost"]
-        }
-    };
-
-    chrome.proxy.settings.set({value: config, scope: "regular"}, function() {});
-
     function callbackFn(details) {
         return {
             authCredentials: {
@@ -136,9 +131,6 @@ def create_proxy_extension(proxy: dict) -> str:
         ['blocking']
     );
     """ % (
-        scheme,
-        host,
-        port,
         username,
         password,
     )
@@ -237,14 +229,28 @@ async def get_webdriver_nd(proxy: dict = None) -> nd.Browser:
     if USER_AGENT is not None:
         options.add_argument("--user-agent=%s" % USER_AGENT)
 
+    # Selection on the command line for every proxy, credentials or not,
+    # so the network stack is pinned before the first socket opens. The
+    # extension only answers the auth challenge; see create_proxy_extension
+    # for the race that split these two jobs apart.
+    #
+    # The log line is unconditional on purpose. The credentialed branch
+    # used to say nothing at all, so a browser that never received its
+    # proxy read exactly like one that did, and the only way to tell them
+    # apart was the address a destination reported back. Credentials are
+    # never logged.
     proxy_extension_dir = None
-    if proxy and all(key in proxy for key in ["url", "username", "password"]):
-        proxy_extension_dir = create_proxy_extension(proxy)
-        options.add_extension(os.path.abspath(proxy_extension_dir))
-    elif proxy and "url" in proxy:
-        proxy_url = proxy["url"]
-        logging.debug("Using proxy: %s", proxy_url)
-        options.add_argument("--proxy-server=%s" % proxy_url)
+    if proxy and "url" in proxy:
+        options.add_argument("--proxy-server=%s" % proxy["url"])
+
+        if all(key in proxy for key in ["username", "password"]):
+            proxy_extension_dir = create_proxy_extension(proxy)
+            options.add_extension(os.path.abspath(proxy_extension_dir))
+            logging.info("Browser egress: proxy %s (authenticated)", proxy["url"])
+        else:
+            logging.info("Browser egress: proxy %s", proxy["url"])
+    else:
+        logging.info("Browser egress: direct, no proxy attached")
 
     # add cloudflare extension
     # https://github.com/TheFalloutOf76/CDP-bug-MouseEvent-.screenX-.screenY-patcher
@@ -267,12 +273,21 @@ async def get_webdriver_nd(proxy: dict = None) -> nd.Browser:
 
     try:
         driver = await nd.Browser.create(config=options)
-    except Exception as e:
-        logging.error("Error creating Chrome Browser: %s" % e)
+    except Exception:
+        # Nothing here can recover a browser that would not start, and
+        # swallowing it left `driver` unbound so the caller saw an
+        # UnboundLocalError instead of the real reason.
+        if proxy_extension_dir is not None:
+            shutil.rmtree(proxy_extension_dir, ignore_errors=True)
+        raise
 
-    # clean up proxy extension directory
-    if proxy_extension_dir is not None:
-        shutil.rmtree(proxy_extension_dir)
+    # Keep the extension readable for as long as the browser lives. A
+    # manifest v3 service worker is torn down when idle and restarted
+    # from these files on the next auth challenge, so deleting the
+    # directory here (as this used to, immediately) left a long-lived
+    # session unable to authenticate. after_run_cleanup removes it when
+    # the browser goes.
+    driver.kdz_proxy_extension_dir = proxy_extension_dir
 
     return driver
 
@@ -312,18 +327,27 @@ def get_webdriver_uc(proxy: dict = None) -> WebDriver:
     if USER_AGENT is not None:
         options.add_argument("--user-agent=%s" % USER_AGENT)
 
+    # Same split as get_webdriver_nd: the command line selects the proxy,
+    # the extension only answers the auth challenge. This branch has to
+    # move with it, because create_proxy_extension no longer sets the
+    # proxy and an extension-only binding would leave this driver going
+    # direct.
     proxy_extension_dir = None
-    if proxy and all(key in proxy for key in ["url", "username", "password"]):
-        proxy_extension_dir = create_proxy_extension(proxy)
-        # required for newer Chromium where --load-extension is being deprecated
-        options.add_argument("--disable-features=DisableLoadExtensionCommandLineSwitch")
-        options.add_argument(
-            "--load-extension=%s" % os.path.abspath(proxy_extension_dir)
-        )
-    elif proxy and "url" in proxy:
-        proxy_url = proxy["url"]
-        logging.debug("Using webdriver proxy: %s", proxy_url)
-        options.add_argument("--proxy-server=%s" % proxy_url)
+    if proxy and "url" in proxy:
+        options.add_argument("--proxy-server=%s" % proxy["url"])
+
+        if all(key in proxy for key in ["username", "password"]):
+            proxy_extension_dir = create_proxy_extension(proxy)
+            # required for newer Chromium where --load-extension is being deprecated
+            options.add_argument("--disable-features=DisableLoadExtensionCommandLineSwitch")
+            options.add_argument(
+                "--load-extension=%s" % os.path.abspath(proxy_extension_dir)
+            )
+            logging.info("Browser egress: proxy %s (authenticated)", proxy["url"])
+        else:
+            logging.info("Browser egress: proxy %s", proxy["url"])
+    else:
+        logging.info("Browser egress: direct, no proxy attached")
 
     # note: headless mode is detected (headless = True)
     # we launch the browser in head-full mode with the window hidden
@@ -537,6 +561,13 @@ async def after_run_cleanup(driver: nd.Browser):
     the Browser instance data dir if necessary.
     """
 
+    # Drop the per-browser proxy auth extension first, so it goes even on
+    # the early return below. get_webdriver_nd stamps the path on.
+    extension_dir = getattr(driver, "kdz_proxy_extension_dir", None)
+    if extension_dir is not None:
+        shutil.rmtree(extension_dir, ignore_errors=True)
+        driver.kdz_proxy_extension_dir = None
+
     # Get Browser instance process
     process = driver.get_process
     if process is None:
@@ -582,12 +613,27 @@ async def after_run_cleanup(driver: nd.Browser):
         await asyncio.sleep(0.1)
         if process.returncode is None:
             process.terminate()
-            # Wait with timeout for the process to actually terminate
+            # Wait with timeout for the process to actually terminate.
+            # Both waits are bounded: this browser was usually started
+            # under a different event loop (waitress hands each request
+            # its own via asyncio.run), and the loop that owns the child
+            # watcher is closed by the time a later request tears the
+            # browser down, so process.wait() can block forever. Observed
+            # on the session TTL recreate: the request held its waitress
+            # thread past 70 seconds and never reached "Session
+            # destroyed". Four of those and the container answers
+            # nothing. The psutil sweep below is the real reaper anyway.
             try:
                 await asyncio.wait_for(process.wait(), timeout=5.0)
             except asyncio.TimeoutError:
                 process.kill()
-                await process.wait()
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    logging.warning(
+                        "Browser process %s did not report termination; "
+                        "leaving it to the process sweep", process.pid
+                    )
     except Exception as e:
         logging.debug(f"Process cleanup note: {e}")
 

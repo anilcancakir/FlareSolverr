@@ -14,6 +14,7 @@ class Session:
     session_id: str
     driver: WebDriver
     created_at: datetime
+    proxy: Optional[dict] = None
 
     def lifetime(self) -> timedelta:
         return datetime.now() - self.created_at
@@ -47,7 +48,7 @@ class SessionsStorage:
 
         driver = utils.get_webdriver_uc(proxy)
         created_at = datetime.now()
-        session = Session(session_id, driver, created_at)
+        session = Session(session_id, driver, created_at, proxy)
 
         self.sessions[session_id] = session
 
@@ -71,12 +72,33 @@ class SessionsStorage:
         session.driver.quit()
         return True
 
-    def get(self, session_id: str, ttl: Optional[timedelta] = None) -> Tuple[Session, bool]:
-        session, fresh = self.create(session_id)
+    def get(self, session_id: str, ttl: Optional[timedelta] = None,
+            proxy: Optional[dict] = None) -> Tuple[Session, bool]:
+        """resolve the driver a request should run in.
+
+        Carries the proxy for the same reason as the nodriver storage:
+        both branches here build a driver, and calling create() with the
+        session id alone built them unproxied without saying so, which
+        sent the request out of the host's own address while the response
+        still reported success.
+        """
+        if not self.exists(session_id):
+            logging.warning(
+                f'unknown session {session_id}; creating it for this request. '
+                'the caller believed this driver already existed'
+            )
+
+        session, fresh = self.create(session_id, proxy=proxy)
+
+        if not fresh and proxy is not None and proxy != session.proxy:
+            raise Exception(
+                f'Session {session_id} is bound to a different proxy than the one '
+                'supplied with this request. Destroy the session and create it again.'
+            )
 
         if ttl is not None and not fresh and session.lifetime() > ttl:
             logging.debug(f'session\'s lifetime has expired, so the session is recreated (session_id={session_id})')
-            session, fresh = self.create(session_id, force_new=True)
+            session, fresh = self.create(session_id, proxy=proxy or session.proxy, force_new=True)
 
         return session, fresh
 

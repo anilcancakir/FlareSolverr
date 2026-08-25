@@ -318,7 +318,7 @@ async def _resolve_challenge_nd(
                 if req.session_ttl_minutes
                 else None
             )
-            session, fresh = await SESSIONS_STORAGE.get(session_id, ttl)
+            session, fresh = await SESSIONS_STORAGE.get(session_id, ttl, req.proxy)
 
             if fresh:
                 logging.debug(
@@ -363,9 +363,37 @@ async def _evil_logic_nd(
     captured_status_code = 200
     captured_response_url = None
     network_enabled = False
+    document_error = None
+    main_frame_id = None
+    main_request_id = None
+
+    def on_request_will_be_sent(event: utils.nd.cdp.network.RequestWillBeSent):
+        """follow the main frame's document request, and only that one.
+
+        Chromium reports an iframe's document as ResourceType.DOCUMENT as
+        well, so a third party iframe that fails to load is
+        indistinguishable from the page itself failing unless the two are
+        told apart here. A navigation's main resource is given the same id
+        as its loader, which separates it from a subresource, and the
+        frame that navigates first is the main one, since a page is
+        requested before anything inside it.
+        """
+        nonlocal main_frame_id, main_request_id, document_error
+        if event.type_ != utils.nd.cdp.network.ResourceType.DOCUMENT:
+            return
+        if str(event.request_id) != str(event.loader_id):
+            return
+        if main_frame_id is None:
+            main_frame_id = event.frame_id
+        if event.frame_id != main_frame_id:
+            return
+        main_request_id = event.request_id
+        # A fresh navigation supersedes whatever the last one ended on.
+        document_error = None
 
     def on_response_received(event: utils.nd.cdp.network.ResponseReceived):
         nonlocal captured_response_headers, captured_status_code, captured_response_url
+        nonlocal document_error
         # Only capture for document type (main page request)
         if event.type_ == utils.nd.cdp.network.ResourceType.DOCUMENT:
             # Track redirects - log if URL changed
@@ -374,7 +402,34 @@ async def _evil_logic_nd(
             captured_response_url = event.response.url
             captured_response_headers = dict(event.response.headers)
             captured_status_code = event.response.status
+            # A document that arrived supersedes an earlier failed attempt,
+            # which is the normal shape of a retried or redirected load.
+            if main_request_id is None or event.request_id == main_request_id:
+                document_error = None
             logging.debug(f"[RESPONSE-HEADERS] Captured {len(captured_response_headers)} headers, status: {captured_status_code}")
+
+    def on_loading_failed(event: utils.nd.cdp.network.LoadingFailed):
+        """remember a main-document load that never produced a response.
+
+        captured_status_code starts at 200 and is only ever written by a
+        response that arrived, so a document that failed at the network
+        layer left it at 200 and the caller was handed Chromium's own
+        error page as a successful body. That is how an unreachable proxy
+        looked identical to a working one from the outside.
+
+        An aborted load is excluded: cancelling the in-flight document is
+        how an ordinary redirect or challenge reload shows up here.
+        """
+        nonlocal document_error
+        if event.type_ != utils.nd.cdp.network.ResourceType.DOCUMENT:
+            return
+        if event.canceled or event.error_text == "net::ERR_ABORTED":
+            return
+        if main_request_id is not None and event.request_id != main_request_id:
+            logging.debug(f"[NETWORK] Sub-frame document failed, ignoring: {event.error_text}")
+            return
+        logging.warning(f"[NETWORK] Document load failed: {event.error_text}")
+        document_error = event.error_text
 
     # navigate to the page
     logging.debug(f"[NAVIGATION] Starting navigation to: {req.url}")
@@ -398,7 +453,9 @@ async def _evil_logic_nd(
         logging.debug("[NETWORK] Network monitoring enabled")
 
         # Add handler to capture response headers
+        tab.add_handler(utils.nd.cdp.network.RequestWillBeSent, on_request_will_be_sent)
         tab.add_handler(utils.nd.cdp.network.ResponseReceived, on_response_received)
+        tab.add_handler(utils.nd.cdp.network.LoadingFailed, on_loading_failed)
         logging.debug("[NETWORK] Response handler added")
     except Exception as e:
         logging.warning(f"[NETWORK] Failed to enable network monitoring: {e}")
@@ -439,6 +496,13 @@ async def _evil_logic_nd(
     logging.debug(f"[NAVIGATION] Navigation completed, tab target: {tab.target.target_id if tab.target else 'None'}")
     logging.debug(f"[NAVIGATION] Tab URL: {tab.target.url if tab.target else 'None'}")
     logging.debug(f"[NAVIGATION] Tab title: {tab.target.title if tab.target else 'None'}")
+
+    # Chromium renders its own error page when the document never loaded,
+    # and that page is a perfectly valid 200 to everything downstream. Stop
+    # here instead, so an unreachable proxy fails the request rather than
+    # returning a body the caller cannot tell apart from the real site.
+    if document_error is not None:
+        raise Exception(f"The page could not be loaded: {document_error}")
 
     # Insert cookies in Browser if set
     if req.cookies is not None and len(req.cookies) > 0:
@@ -661,6 +725,13 @@ async def _evil_logic_nd(
             logging.info("[JSON POST] Fetch completed successfully")
         except Exception as e:
             logging.warning(f"[JSON POST] Fetch failed: {e}")
+
+    # Checked again here because the form POST path navigates to a data:
+    # URL and only reaches the network when the page submits, which is
+    # after the check above. A document that arrived since then cleared
+    # this, so a retried or redirected load does not trip it.
+    if document_error is not None:
+        raise Exception(f"The page could not be loaded: {document_error}")
 
     logging.debug("[RESPONSE] Building response object...")
 

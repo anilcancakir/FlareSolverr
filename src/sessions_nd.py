@@ -151,8 +151,13 @@ class SessionsStorage:
 
         session = self.sessions.pop(session_id)
         logging.debug(f"[SESSION] Cleaning up browser for session: {session_id}")
-        await utils.after_run_cleanup(driver=session.driver)
-        await session.loop.close()
+        # The browser's websocket answers on the session loop only. Torn
+        # down from this request's loop, its aclose() fails with "attached
+        # to a different loop" and the socket is never closed by us.
+        try:
+            await session.loop.run(utils.after_run_cleanup(driver=session.driver))
+        finally:
+            await session.loop.close()
         logging.debug(f"[SESSION] Session destroyed: {session_id}")
         logging.debug(f"[SESSION] Remaining active sessions: {len(self.sessions)}")
         return True

@@ -202,6 +202,18 @@ class TestSessionsStorageEventLoopOwnership(unittest.TestCase):
         self.assertTrue(session.driver.stopped)
         self.assertTrue(loop.is_closed())
 
+    def test_destroy_tears_the_browser_down_on_the_loop_it_was_built_on(self):
+        """Teardown from another loop cannot close the browser's websocket.
+
+        Its aclose() failed with "attached to a different loop", logged as
+        a task exception that was never retrieved.
+        """
+        session, _ = run(self.storage.create('s1'))
+
+        run(self.storage.destroy('s1'))
+
+        self.assertIs(session.driver.built_on, session.driver.stopped_on)
+
     def test_a_browser_that_fails_to_start_does_not_leak_its_loop(self):
         threads_before = threading.active_count()
 

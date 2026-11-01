@@ -5,7 +5,7 @@ import time
 import asyncio
 from datetime import timedelta
 from urllib.parse import unquote, urlparse
-from typing import List
+from typing import List, Optional
 from nodriver import Browser, Tab
 from sessions_nd import SessionsStorage
 
@@ -238,8 +238,24 @@ async def _cmd_sessions_update_nd(req: V1RequestBase) -> V1ResponseBase:
         raise Exception("The session doesn't exist.")
 
     session = SESSIONS_STORAGE.sessions[session_id]
-    driver = session.driver
+    final_cookies = await session.loop.run(
+        _merge_session_cookies_nd(session.driver, req.cookies)
+    )
 
+    return V1ResponseBase({
+        "status": STATUS_OK,
+        "message": "Session updated successfully.",
+        "session": session_id,
+        "cookies": final_cookies,
+    })
+
+
+async def _merge_session_cookies_nd(driver: Browser, cookies: Optional[list]) -> list:
+    """merge cookies into a session browser and return the resulting jar.
+
+    Runs on the session's own loop (see SessionLoop), like everything else
+    that touches a session's browser.
+    """
     # Ensure we have an active tab for cookie operations
     tab = await driver.get("about:blank")
 
@@ -247,7 +263,7 @@ async def _cmd_sessions_update_nd(req: V1RequestBase) -> V1ResponseBase:
     existing_cookies = await driver.cookies.get_all(requests_cookie_format=True)
 
     # Merge: existing + new (new overrides same name+domain)
-    if req.cookies and len(req.cookies) > 0:
+    if cookies and len(cookies) > 0:
         cookie_map = {}
 
         # Add existing cookies to map
@@ -263,7 +279,7 @@ async def _cmd_sessions_update_nd(req: V1RequestBase) -> V1ResponseBase:
             cookie_map[key] = c
 
         # Add/override with new cookies
-        for c in req.cookies:
+        for c in cookies:
             key = f"{c['name']}:{c.get('domain', '')}"
             cookie_map[key] = c
 
@@ -297,12 +313,7 @@ async def _cmd_sessions_update_nd(req: V1RequestBase) -> V1ResponseBase:
     # Close the tab websocket to allow reuse
     await tab.aclose()
 
-    return V1ResponseBase({
-        "status": STATUS_OK,
-        "message": "Session updated successfully.",
-        "session": session_id,
-        "cookies": final_cookies,
-    })
+    return final_cookies
 
 
 async def _resolve_challenge_nd(
@@ -331,14 +342,16 @@ async def _resolve_challenge_nd(
                 )
 
             driver = session.driver
+            # The session's browser only answers on the loop it was built
+            # on; this request's own loop closes when the request returns.
+            solving = session.loop.run(_evil_logic_nd(req, driver, method))
         else:
             driver = await utils.get_webdriver_nd(req.proxy)
             logging.debug(
                 "New instance of chromium has been created to perform the request"
             )
-        return await asyncio.wait_for(
-            _evil_logic_nd(req, driver, method), timeout=timeout
-        )
+            solving = _evil_logic_nd(req, driver, method)
+        return await asyncio.wait_for(solving, timeout=timeout)
     except TimeoutError:
         raise Exception(
             f"Error solving the challenge. Timeout after {timeout} seconds."

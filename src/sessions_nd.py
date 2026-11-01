@@ -1,13 +1,77 @@
 import logging
 import asyncio
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Optional, Tuple
+from typing import Any, Coroutine, Optional, Tuple, TypeVar
 from uuid import uuid1
 
 from nodriver import Browser
 
 import utils
+
+T = TypeVar("T")
+
+
+class SessionLoop:
+    """the event loop a session's browser lives on, running on its own thread.
+
+    flaresolverr.py serves every HTTP request with its own asyncio.run, and
+    that loop is closed when the request returns. A nodriver Browser keeps
+    its browser-level websocket, its listener task and every pending CDP
+    future on the loop it was created on, so a browser built in one
+    request cannot be driven from the next: the reply to a browser-level
+    command is never read and the awaiting call hangs. click_verify_nd's
+    update_targets() is such a call, which is why a session request on a
+    Cloudflare challenge used to wait out maxTimeout.
+
+    A session therefore owns a loop that lives exactly as long as its
+    browser, and every coroutine that touches the browser runs here.
+    """
+
+    def __init__(self, session_id: str):
+        self._loop = asyncio.new_event_loop()
+        self._thread = threading.Thread(
+            target=self._loop.run_forever,
+            name=f"session-{session_id}",
+            daemon=True,
+        )
+        self._thread.start()
+
+    async def run(self, coro: Coroutine[Any, Any, T]) -> T:
+        """run coro on the session loop and await its result from the caller's loop.
+
+        Cancelling the caller (asyncio.wait_for on maxTimeout) cancels coro
+        on the session loop as well, so a timed out solve stops instead of
+        lingering in the browser.
+        """
+        return await asyncio.wrap_future(
+            asyncio.run_coroutine_threadsafe(coro, self._loop)
+        )
+
+    async def close(self) -> None:
+        """cancel what is still pending on the loop, then stop and close it.
+
+        Call this only after the browser has been cleaned up; anything left
+        running at that point (a listener on a dead websocket) is debris.
+        """
+        await self.run(self._cancel_pending())
+        self._loop.call_soon_threadsafe(self._loop.stop)
+        self._thread.join(timeout=5)
+        if self._thread.is_alive():
+            logging.warning(
+                f"[SESSION] Loop thread {self._thread.name} did not stop; leaving it open"
+            )
+            return
+        self._loop.close()
+
+    @staticmethod
+    async def _cancel_pending() -> None:
+        current = asyncio.current_task()
+        pending = [task for task in asyncio.all_tasks() if task is not current]
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
 
 
 @dataclass
@@ -15,6 +79,7 @@ class Session:
     session_id: str
     driver: Browser
     created_at: datetime
+    loop: SessionLoop
     proxy: Optional[dict] = None
 
     def lifetime(self) -> timedelta:
@@ -55,9 +120,14 @@ class SessionsStorage:
             return self.sessions[session_id], False
 
         logging.debug(f"[SESSION] Creating new session: {session_id}")
-        driver = await utils.get_webdriver_nd(proxy)
+        loop = SessionLoop(session_id)
+        try:
+            driver = await loop.run(utils.get_webdriver_nd(proxy))
+        except Exception:
+            await loop.close()
+            raise
         created_at = datetime.now()
-        session = Session(session_id, driver, created_at, proxy)
+        session = Session(session_id, driver, created_at, loop, proxy)
 
         self.sessions[session_id] = session
         logging.debug(f"[SESSION] Session created successfully: {session_id}")
@@ -82,6 +152,7 @@ class SessionsStorage:
         session = self.sessions.pop(session_id)
         logging.debug(f"[SESSION] Cleaning up browser for session: {session_id}")
         await utils.after_run_cleanup(driver=session.driver)
+        await session.loop.close()
         logging.debug(f"[SESSION] Session destroyed: {session_id}")
         logging.debug(f"[SESSION] Remaining active sessions: {len(self.sessions)}")
         return True
